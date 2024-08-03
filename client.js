@@ -68,11 +68,20 @@ client.on("data", (data) => {
 
     offset += 17;
   }
+
+  if (allDataReceived) {
+    requestMissingPackets();
+  }
 });
 
 // Handle connection end
 client.on("end", () => {
   console.log("Disconnected from server.");
+  allDataReceived = true;
+
+  // Identify and request missing sequences
+  identifyMissingSequences();
+  requestMissingPackets();
 });
 
 // Handle errors
@@ -91,4 +100,53 @@ function createPayloadToSend({ callType, resendSeq }) {
   buffer.writeUInt8(resendSeq, 1);
 
   return buffer;
+}
+
+// Identify missing sequences
+function identifyMissingSequences() {
+  response.sort((a, b) => a.packetSequence - b.packetSequence);
+  let expectedSeq = 1;
+
+  for (const packet of response) {
+    while (expectedSeq < packet.packetSequence) {
+      missingSequences.add(expectedSeq);
+      expectedSeq++;
+    }
+    expectedSeq++;
+  }
+
+  console.log("Missing sequences:", [...missingSequences]);
+}
+
+// Request missing packets from the server
+function requestMissingPackets() {
+  if (missingSequences.size === 0) {
+    writeToJSONFile();
+    if (!connectionClosed) {
+      client.end(); // Close the connection after all data is received
+      connectionClosed = true;
+    }
+    return;
+  }
+  connect();
+  for (const seq of missingSequences) {
+    console.log(`Requesting missing packet with sequence: ${seq}`);
+    if (!connectionClosed) {
+      makeRequest(resendPacketPayload(seq));
+    }
+  }
+  missingSequences.clear(); // Clear the set after requesting missing packets
+}
+
+// Write the final response to a JSON file
+function writeToJSONFile() {
+  const fileName = "output.json";
+  response.sort((a, b) => a.packetSequence - b.packetSequence);
+  fs.writeFile(fileName, JSON.stringify(response, null, 2), (err) => {
+    if (err) {
+      console.error("Error writing to JSON file:", err);
+    } else {
+      console.log(`Data successfully written to ${fileName}`);
+    }
+  });
 }
